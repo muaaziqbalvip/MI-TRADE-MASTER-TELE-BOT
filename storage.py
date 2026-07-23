@@ -80,6 +80,8 @@ def active_subscriber_ids() -> list:
 DEFAULT_SETTINGS = {
     "categories": ["forex_otc", "crypto"],
     "min_confidence": 82,
+    "chart_timeframe": "1m",
+    "expiry_minutes": 5,
 }
 
 
@@ -89,13 +91,17 @@ def load_settings() -> dict:
 
 def get_user_settings(chat_id: str) -> dict:
     settings = load_settings()
-    return settings.get(str(chat_id), dict(DEFAULT_SETTINGS))
+    stored = settings.get(str(chat_id), {})
+    merged = dict(DEFAULT_SETTINGS)
+    merged.update(stored)
+    return merged
 
 
 def update_user_settings(chat_id: str, **kwargs):
     settings = load_settings()
     chat_id = str(chat_id)
-    current = settings.get(chat_id, dict(DEFAULT_SETTINGS))
+    current = dict(DEFAULT_SETTINGS)
+    current.update(settings.get(chat_id, {}))
     current.update(kwargs)
     settings[chat_id] = current
     _save(SETTINGS_FILE, settings)
@@ -104,7 +110,8 @@ def update_user_settings(chat_id: str, **kwargs):
 def toggle_category(chat_id: str, category: str):
     settings = load_settings()
     chat_id = str(chat_id)
-    current = settings.get(chat_id, dict(DEFAULT_SETTINGS))
+    current = dict(DEFAULT_SETTINGS)
+    current.update(settings.get(chat_id, {}))
     cats = set(current.get("categories", []))
     if category in cats:
         cats.discard(category)

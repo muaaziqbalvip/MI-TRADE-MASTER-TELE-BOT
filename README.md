@@ -20,8 +20,13 @@ Runs **entirely free, 24/7, on GitHub Actions** — no server required.
   Commodities, Indices
 - 🎨 **Beautiful Telegram UI** — inline buttons, emoji-rich formatted signal
   cards, visual confidence bars, live navigation menus
+- 📸 **Screenshot chart analysis (Vision AI)** — send any chart screenshot
+  (Quotex, TradingView, MetaTrader, any platform) and get an instant
+  AI-powered read of the visible price action, rendered back as a clean
+  branded signal chart — no login or account access required, ever
 - ⚙️ **Per-user preferences** — subscribe/unsubscribe, pick asset categories,
-  set your own minimum confidence threshold
+  set your own minimum confidence threshold, and set your default chart
+  timeframe + trade expiry for screenshot analysis
 - 🎯 **On-demand signals** — tap any asset for an instant live analysis
 - 📊 **Live stats dashboard** — total signals, win-direction split, top assets
 - ♻️ **True 24/7 uptime** — self-restarting GitHub Actions workflow chains
@@ -67,7 +72,13 @@ In your repo: **Settings → Secrets and variables → Actions → New repositor
 | Name | Value |
 |---|---|
 | `BOT_TOKEN` | The token from BotFather |
+| `GROQ_API_KEY` | Free API key from [console.groq.com](https://console.groq.com) — powers screenshot chart analysis |
 | `ADMIN_CHAT_IDS` | *(optional)* comma-separated Telegram chat IDs for admin alerts |
+
+> 🔒 **Security note:** This bot never asks for, stores, or uses any trading
+> platform login, password, or verification code. Screenshot analysis works
+> purely by reading the image visually via AI vision — your account
+> credentials are never touched, requested, or required.
 
 ### 4. Enable Actions & start the bot
 Go to the **Actions** tab → select **"MI Trade Master — 24/7 Signal Bot"** →
@@ -87,6 +98,8 @@ mi-trade-master/
 ├── bot.py                # Telegram handlers (commands, buttons)
 ├── scanner.py             # Background auto-scan + broadcast loop
 ├── engine.py               # Signal generation (SMC + confluence scoring)
+├── vision.py                # Groq Vision AI — analyzes chart screenshots
+├── chartgen.py                # Renders branded signal chart images
 ├── indicators.py            # RSI, EMA, MACD, Bollinger, Stochastic, structure
 ├── fetcher.py               # Binance + Yahoo Finance data fetching
 ├── ui.py                    # Message formatting & inline keyboards

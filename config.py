@@ -11,6 +11,18 @@ import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # ---------------------------------------------------------------------------
+# Groq Vision (chart screenshot analysis)
+# ---------------------------------------------------------------------------
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+
+# User-configurable chart timeframe options and trade (expiry) duration options
+CHART_TIMEFRAMES = ["30s", "1m", "5m", "15m", "30m", "1h"]
+EXPIRY_OPTIONS = [1, 2, 3, 5, 10, 15, 30]
+DEFAULT_CHART_TIMEFRAME = "1m"
+DEFAULT_EXPIRY_MINUTES = 5
+
+# ---------------------------------------------------------------------------
 # Branding
 # ---------------------------------------------------------------------------
 BOT_NAME = "MI Trade Master"

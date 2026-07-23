@@ -12,6 +12,8 @@ import ui
 from config import BOT_TOKEN, ASSETS, CONFIDENCE_THRESHOLD
 from engine import generate_signal
 from fetcher import fetch_candles
+from vision import analyze_chart_image
+from chartgen import render_signal_chart
 
 log = logging.getLogger("mi.bot")
 
@@ -117,6 +119,53 @@ def handle_callback(call):
                 reply_markup=ui.settings_keyboard(settings),
             )
 
+        elif data == "menu:vision_help":
+            bot.answer_callback_query(call.id)
+            settings = storage.get_user_settings(chat_id)
+            bot.edit_message_text(
+                ui.vision_help_text(settings),
+                chat_id, msg_id,
+                reply_markup=ui.back_keyboard(),
+            )
+
+        elif data == "menu:vision_settings":
+            bot.answer_callback_query(call.id)
+            settings = storage.get_user_settings(chat_id)
+            bot.edit_message_text(
+                "📸 <b>Screenshot Analysis Settings</b>\n\n"
+                "Set the chart timeframe you'll typically screenshot, and "
+                "your preferred trade expiry duration. These apply to every "
+                "screenshot you send.",
+                chat_id, msg_id,
+                reply_markup=ui.vision_settings_keyboard(settings),
+            )
+
+        elif data.startswith("vtf:"):
+            timeframe = data.split(":", 1)[1]
+            storage.update_user_settings(chat_id, chart_timeframe=timeframe)
+            bot.answer_callback_query(call.id, f"Chart timeframe set to {timeframe}")
+            settings = storage.get_user_settings(chat_id)
+            bot.edit_message_text(
+                "📸 <b>Screenshot Analysis Settings</b>\n\n"
+                "Set the chart timeframe you'll typically screenshot, and "
+                "your preferred trade expiry duration.",
+                chat_id, msg_id,
+                reply_markup=ui.vision_settings_keyboard(settings),
+            )
+
+        elif data.startswith("vexp:"):
+            expiry = int(data.split(":", 1)[1])
+            storage.update_user_settings(chat_id, expiry_minutes=expiry)
+            bot.answer_callback_query(call.id, f"Expiry set to {expiry} min")
+            settings = storage.get_user_settings(chat_id)
+            bot.edit_message_text(
+                "📸 <b>Screenshot Analysis Settings</b>\n\n"
+                "Set the chart timeframe you'll typically screenshot, and "
+                "your preferred trade expiry duration.",
+                chat_id, msg_id,
+                reply_markup=ui.vision_settings_keyboard(settings),
+            )
+
         elif data == "menu:stats":
             bot.answer_callback_query(call.id)
             stats = storage.load_stats()
@@ -207,6 +256,58 @@ def _run_live_analysis(chat_id, msg_id, symbol):
         chat_id, msg_id,
         reply_markup=ui.back_keyboard("menu:live"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Screenshot chart analysis (photo upload)
+# ---------------------------------------------------------------------------
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    chat_id = message.chat.id
+    settings = storage.get_user_settings(chat_id)
+    timeframe = settings.get("chart_timeframe", "1m")
+    expiry = settings.get("expiry_minutes", 5)
+
+    status_msg = bot.send_message(chat_id, ui.vision_analyzing_text())
+    bot.send_chat_action(chat_id, "upload_photo")
+
+    try:
+        # Telegram sends multiple resolutions; take the highest quality one
+        file_id = message.photo[-1].file_id
+        file_info = bot.get_file(file_id)
+        image_bytes = bot.download_file(file_info.file_path)
+
+        analysis = analyze_chart_image(image_bytes, timeframe, expiry)
+
+        if not analysis:
+            bot.edit_message_text(
+                "⚠️ <b>Couldn't analyze that image.</b>\n\n"
+                "Make sure it's a clear screenshot of a price chart, then try again.",
+                chat_id, status_msg.message_id,
+                reply_markup=ui.back_keyboard(),
+            )
+            return
+
+        chart_png = render_signal_chart(analysis, symbol_label=analysis.get("asset_guess") or "Your Chart")
+
+        bot.delete_message(chat_id, status_msg.message_id)
+        bot.send_photo(
+            chat_id,
+            chart_png,
+            caption=ui.format_vision_signal_caption(analysis),
+            reply_markup=ui.back_keyboard(),
+        )
+
+    except Exception as e:
+        log.error(f"Photo analysis failed: {e}")
+        try:
+            bot.edit_message_text(
+                "⚠️ <b>Something went wrong analyzing that screenshot.</b>\n\nPlease try again.",
+                chat_id, status_msg.message_id,
+                reply_markup=ui.back_keyboard(),
+            )
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

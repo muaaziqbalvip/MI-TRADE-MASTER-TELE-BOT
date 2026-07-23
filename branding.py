@@ -24,6 +24,7 @@ _DESCRIPTION = (
     "🤖 MI Trade Master — Smart Money Signal Engine\n\n"
     "📡 Forex OTC/Real, Crypto, Commodities & Indices\n"
     "🧠 SMC/ICT market structure + multi-indicator confluence scoring\n"
+    "📸 Send a chart screenshot for instant AI vision analysis\n"
     "⚡ Live 24/7 automated scanning\n"
     "🎯 Only high-confidence setups reach you\n\n"
     "⚠️ Educational tool — not financial advice. Trade responsibly."
