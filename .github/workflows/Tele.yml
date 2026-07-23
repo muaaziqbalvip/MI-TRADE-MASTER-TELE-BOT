@@ -50,6 +50,7 @@ jobs:
       - name: ▶️ Run MI Trade Master
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           ADMIN_CHAT_IDS: ${{ secrets.ADMIN_CHAT_IDS }}
           MAX_RUNTIME_MINUTES: "340"
         run: python main.py
