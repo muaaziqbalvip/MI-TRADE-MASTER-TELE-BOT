@@ -1,7 +1,10 @@
 {
   "total_signals": 0,
-  "by_direction": {"BUY": 0, "SELL": 0},
+  "by_direction": {
+    "BUY": 0,
+    "SELL": 0
+  },
   "by_symbol": {},
-  "started_at": null,
+  "started_at": "2026-07-23T07:14:23.399654+00:00",
   "last_signal_at": null
 }

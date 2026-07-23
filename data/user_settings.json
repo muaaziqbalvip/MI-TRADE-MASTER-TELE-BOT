@@ -1,1 +1,12 @@
-{}
+{
+  "7218516175": {
+    "categories": [
+      "crypto",
+      "forex_otc",
+      "forex_real"
+    ],
+    "min_confidence": 85,
+    "chart_timeframe": "1m",
+    "expiry_minutes": 2
+  }
+}
