@@ -1,1 +1,11 @@
-{}
+{
+  "7218516175": {
+    "categories": [
+      "commodities",
+      "crypto",
+      "forex_otc",
+      "forex_real"
+    ],
+    "min_confidence": 88
+  }
+}
