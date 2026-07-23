@@ -136,6 +136,12 @@ If screenshot analysis (or anything else) isn't working:
 4. If `/logs` says `no_api_key` or `auth_failed`, the `GROQ_API_KEY`
    secret is missing or wrong — add/fix it in **Settings → Secrets and
    variables → Actions**, then re-run the workflow.
+5. If `/logs` says `parse_error`, the error detail now shows the model's
+   actual raw output (not just a generic message) — the full response is
+   also logged server-side in the GitHub Actions run for deeper debugging.
+   The bot forces Groq's JSON mode (`response_format: json_object`) and
+   automatically retries without it if a model rejects that parameter,
+   so this should be rare.
 
 If `ADMIN_CHAT_IDS` is set, `/logs` is restricted to those chat IDs, and
 critical config errors (missing/invalid Groq key) are pushed to them

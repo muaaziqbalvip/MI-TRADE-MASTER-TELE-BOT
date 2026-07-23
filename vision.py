@@ -35,21 +35,32 @@ If the image does not show a readable price chart, set "direction" to "NEUTRAL",
 
 
 def _extract_json(text: str) -> dict | None:
-    """Groq sometimes wraps JSON in markdown fences despite instructions — strip them."""
+    """Groq sometimes wraps JSON in markdown fences or adds stray text
+    despite instructions — strip fences and try progressively looser
+    extraction strategies before giving up."""
     text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
+
+    # Strip markdown code fences if present
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
     try:
-        return json.loads(text)
+        return json.loads(cleaned)
     except Exception:
-        # Last resort: find the first {...} block
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                return None
-        return None
+        pass
+
+    # Try finding the first balanced {...} block (handles leading/trailing
+    # commentary the model added despite instructions not to).
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = cleaned[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+    return None
 
 
 def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int):
@@ -97,6 +108,7 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
         ],
         "temperature": 0.2,
         "max_tokens": 600,
+        "response_format": {"type": "json_object"},
     }
 
     headers = {
@@ -104,6 +116,25 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
         "Content-Type": "application/json",
     }
 
+    result = _send_request(payload, headers)
+
+    # Some models reject response_format for vision+JSON combos with a 400 —
+    # if so, retry once without it, relying on the prompt's JSON instructions.
+    if result[1] == "bad_request" and "response_format" in payload:
+        log.warning("Retrying Groq request without response_format (model may not support it)")
+        fallback_payload = dict(payload)
+        del fallback_payload["response_format"]
+        result = _send_request(fallback_payload, headers)
+
+    analysis, error_code, error_detail = result
+    if analysis:
+        analysis["timeframe"] = timeframe
+        analysis["expiry_minutes"] = expiry_minutes
+    return analysis, error_code, error_detail
+
+
+def _send_request(payload: dict, headers: dict):
+    """Send one request to Groq and parse the result. Returns (analysis, error_code, error_detail)."""
     try:
         r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
     except requests.exceptions.Timeout:
@@ -142,18 +173,28 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
         return None, "server_error", f"HTTP {r.status_code}: {detail}"
 
     try:
-        result = r.json()
-        content = result["choices"][0]["message"]["content"]
+        result_json = r.json()
+        content = result_json["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError) as e:
         log.error(f"Unexpected Groq response shape: {e} — raw: {r.text[:300]}")
         return None, "parse_error", f"Unexpected response shape from Groq: {e}"
 
+    if not content or not content.strip():
+        log.error("Groq returned an empty message content")
+        return None, "parse_error", "Model returned an empty response."
+
     parsed = _extract_json(content)
     if not parsed:
-        log.error(f"Could not parse vision response as JSON: {content[:300]}")
-        return None, "parse_error", "Model did not return valid JSON."
+        # Log the FULL content server-side (not just a preview) so it's fully
+        # visible in GitHub Actions logs / diagnostics for debugging.
+        log.error(f"Could not parse vision response as JSON. Raw content:\n{content}")
+        preview = content.strip()[:150].replace("\n", " ")
+        return None, "parse_error", f"Model output: \"{preview}...\"" if len(content.strip()) > 150 else f"Model output: \"{preview}\""
 
-    # Normalize / validate fields
+    return _normalize_analysis(parsed), None, None
+
+
+def _normalize_analysis(parsed: dict) -> dict:
     direction = str(parsed.get("direction", "NEUTRAL")).upper()
     if direction not in ("BUY", "SELL", "NEUTRAL"):
         direction = "NEUTRAL"
@@ -177,10 +218,8 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
         "key_observation": parsed.get("key_observation", ""),
         "reasons": reasons,
         "risk_note": parsed.get("risk_note"),
-        "timeframe": timeframe,
-        "expiry_minutes": expiry_minutes,
     }
-    return analysis, None, None
+    return analysis
 
 
 def _safe_error_detail(response) -> str:
