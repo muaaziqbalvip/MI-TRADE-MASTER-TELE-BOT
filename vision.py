@@ -4,17 +4,22 @@ multimodal model and gets back a structured trading read (direction,
 confidence, key levels, reasoning) grounded in what's visible in the image.
 """
 import base64
+import io
 import json
 import logging
 import re
+import time
 
 import requests
+from PIL import Image
 
 from config import GROQ_API_KEY, GROQ_VISION_MODEL
 
 log = logging.getLogger("mi.vision")
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+_MAX_DIMENSION = 1568  # Groq/most vision models cap useful resolution around here
+_JPEG_QUALITY = 85
 
 _SYSTEM_PROMPT = """You are an expert price-action / SMC-ICT chart analyst reading a screenshot of a trading platform chart (e.g. Quotex, TradingView, MetaTrader).
 
@@ -63,6 +68,33 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
+def _preprocess_image(image_bytes: bytes) -> bytes:
+    """
+    Resize and compress the screenshot before sending it over the wire.
+    Phone screenshots are often 2-4MB at resolutions far beyond what the
+    vision model needs, which slows down upload and processing for no
+    accuracy benefit. This keeps analysis fast without losing readability
+    of chart details.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = img.convert("RGB")
+
+        w, h = img.size
+        if max(w, h) > _MAX_DIMENSION:
+            ratio = _MAX_DIMENSION / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
+        result = buf.getvalue()
+        log.info(f"Preprocessed image: {len(image_bytes)} bytes -> {len(result)} bytes")
+        return result
+    except Exception as e:
+        log.warning(f"Image preprocessing failed, using original: {e}")
+        return image_bytes
+
+
 def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int):
     """
     Send a chart screenshot to the Groq vision model.
@@ -83,7 +115,10 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
         log.error("GROQ_API_KEY not configured")
         return None, "no_api_key", "GROQ_API_KEY environment variable is empty or not set."
 
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    t0 = time.time()
+    processed_bytes = _preprocess_image(image_bytes)
+    b64_image = base64.b64encode(processed_bytes).decode("utf-8")
+    log.info(f"Image encoded for Groq in {time.time()-t0:.2f}s")
 
     user_text = (
         f"This chart is set to a {timeframe} timeframe. The trader intends to "
@@ -135,17 +170,20 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
 
 def _send_request(payload: dict, headers: dict):
     """Send one request to Groq and parse the result. Returns (analysis, error_code, error_detail)."""
+    t0 = time.time()
     try:
-        r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
+        r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=45)
     except requests.exceptions.Timeout:
-        log.error("Groq request timed out")
-        return None, "network_error", "Request to Groq timed out after 30s."
+        log.error(f"Groq request timed out after {time.time()-t0:.1f}s")
+        return None, "network_error", "Request to Groq timed out after 45s."
     except requests.exceptions.ConnectionError as e:
-        log.error(f"Groq connection failed: {e}")
+        log.error(f"Groq connection failed after {time.time()-t0:.1f}s: {e}")
         return None, "network_error", f"Could not reach api.groq.com: {e}"
     except requests.exceptions.RequestException as e:
-        log.error(f"Groq request failed: {e}")
+        log.error(f"Groq request failed after {time.time()-t0:.1f}s: {e}")
         return None, "network_error", str(e)
+
+    log.info(f"Groq HTTP round-trip: {time.time()-t0:.2f}s (status {r.status_code})")
 
     if r.status_code == 401 or r.status_code == 403:
         detail = _safe_error_detail(r)

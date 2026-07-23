@@ -22,8 +22,10 @@ Runs **entirely free, 24/7, on GitHub Actions** — no server required.
   cards, visual confidence bars, live navigation menus
 - 📸 **Screenshot chart analysis (Vision AI)** — send any chart screenshot
   (Quotex, TradingView, MetaTrader, any platform) and get an instant
-  AI-powered read of the visible price action, rendered back as a clean
-  branded signal chart — no login or account access required, ever
+  AI-powered read of the visible price action. The bot overlays the
+  BUY/SELL signal, confidence, and details directly on **your actual
+  screenshot** — never a fake/generated chart — no login or account
+  access required, ever
 - 🩺 **Live diagnostics** — `/logs` shows recent bot activity/errors right
   in Telegram, and specific error messages (missing API key, auth failure,
   rate limit, etc.) instead of one generic "something went wrong"
@@ -142,6 +144,18 @@ If screenshot analysis (or anything else) isn't working:
    The bot forces Groq's JSON mode (`response_format: json_object`) and
    automatically retries without it if a model rejects that parameter,
    so this should be rare.
+6. If the result image looks like a generic/fake chart instead of your
+   own screenshot — that was a bug in an earlier version. The bot now
+   always overlays the signal directly on your actual uploaded image.
+7. If analysis feels slow (several minutes), this was usually caused by
+   large phone screenshots (2-4MB) and single-threaded message handling.
+   Both are fixed: images are now auto-compressed before sending to Groq,
+   and the bot processes each user's request on its own thread so one
+   slow analysis doesn't block everyone else.
+8. If you get "No chart detected in this image" — the AI genuinely
+   couldn't find a readable candlestick chart in the screenshot (e.g. it
+   was cropped, blurry, or showed something else). Try a clearer,
+   uncropped screenshot of the chart itself.
 
 If `ADMIN_CHAT_IDS` is set, `/logs` is restricted to those chat IDs, and
 critical config errors (missing/invalid Groq key) are pushed to them

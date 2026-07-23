@@ -18,7 +18,7 @@ from chartgen import render_signal_chart
 
 log = logging.getLogger("mi.bot")
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=True, num_threads=4)
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +282,8 @@ def _run_live_analysis(chat_id, msg_id, symbol):
 # ---------------------------------------------------------------------------
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
+    import time
+    t0 = time.time()
     chat_id = message.chat.id
     username = message.from_user.username or message.from_user.first_name or "unknown"
     settings = storage.get_user_settings(chat_id)
@@ -297,7 +299,7 @@ def handle_photo(message):
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         image_bytes = bot.download_file(file_info.file_path)
-        log.info(f"📥 [{chat_id}] Image downloaded — {len(image_bytes)} bytes")
+        log.info(f"📥 [{chat_id}] Image downloaded — {len(image_bytes)} bytes ({time.time()-t0:.1f}s elapsed)")
     except Exception as e:
         log.error(f"❌ [{chat_id}] Failed to download photo from Telegram: {e}")
         bot.edit_message_text(
@@ -307,7 +309,9 @@ def handle_photo(message):
         )
         return
 
+    t_before_groq = time.time()
     analysis, error_code, error_detail = analyze_chart_image(image_bytes, timeframe, expiry)
+    log.info(f"🧠 [{chat_id}] Groq analysis took {time.time()-t_before_groq:.1f}s")
 
     if error_code:
         log.error(f"❌ [{chat_id}] Vision analysis failed — code={error_code} detail={error_detail}")
@@ -330,9 +334,25 @@ def handle_photo(message):
         f"confidence={analysis['confidence']}% trend={analysis['trend']}"
     )
 
+    # A NEUTRAL/0% result usually means the model couldn't read a valid chart
+    # in the image at all — surface this clearly instead of sending an
+    # overlay that looks like a broken/empty signal.
+    if analysis["direction"] == "NEUTRAL" and analysis["confidence"] == 0:
+        log.warning(f"⚪ [{chat_id}] Model returned NEUTRAL/0% — likely couldn't read the chart")
+        obs = analysis.get("key_observation") or "The image doesn't appear to show a readable price chart."
+        bot.edit_message_text(
+            f"⚪ <b>No chart detected in this image.</b>\n\n"
+            f"🧠 <i>{obs}</i>\n\n"
+            f"Please send a clear, uncropped screenshot of a candlestick "
+            f"price chart (Quotex, TradingView, MetaTrader, etc.) and try again.",
+            chat_id, status_msg.message_id,
+            reply_markup=ui.back_keyboard(),
+        )
+        return
+
     try:
-        chart_png = render_signal_chart(analysis, symbol_label=analysis.get("asset_guess") or "Your Chart")
-        log.info(f"🖼️ [{chat_id}] Chart image rendered — {len(chart_png)} bytes")
+        chart_png = render_signal_chart(analysis, image_bytes)
+        log.info(f"🖼️ [{chat_id}] Overlay rendered — {len(chart_png)} bytes ({time.time()-t0:.1f}s total)")
     except Exception as e:
         log.error(f"❌ [{chat_id}] Chart rendering failed: {e}")
         # Analysis succeeded even though rendering failed — still give the user the text result

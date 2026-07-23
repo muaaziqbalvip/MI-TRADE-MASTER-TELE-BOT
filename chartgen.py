@@ -1,77 +1,50 @@
 """
-Chart image renderer — builds a clean, professional-looking synthetic
-candlestick chart with a BUY/SELL signal overlay, based on the vision
-model's read of the user's uploaded screenshot. This is a fresh
-illustrative chart (not a crop of the user's image), branded and
-styled consistently with the bot.
+Chart image renderer — takes the user's ACTUAL uploaded chart screenshot
+and draws a clean signal overlay directly on top of it (arrow, confidence
+badge, entry marker). This is the real image the user sent, not a
+synthetic/fake chart — only annotation layers are added.
 """
 import io
 import logging
-import random
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import FancyBboxPatch
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 log = logging.getLogger("mi.chartgen")
 
-_UP_COLOR = "#26a69a"
-_DOWN_COLOR = "#ef5350"
-_BG_COLOR = "#0e1117"
-_GRID_COLOR = "#2a2e39"
-_TEXT_COLOR = "#e0e0e0"
+_UP_COLOR = (38, 166, 154, 255)     # teal green
+_DOWN_COLOR = (239, 83, 80, 255)    # red
+_NEUTRAL_COLOR = (158, 158, 158, 255)
+_WHITE = (255, 255, 255, 255)
+_SHADOW = (0, 0, 0, 160)
 
 
-def _synthesize_candles(direction: str, trend: str, n: int = 40, seed: int | None = None):
+def _load_font(size: int, bold: bool = False):
+    """Try a few common system font paths; fall back to PIL's default bitmap font."""
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_text_with_shadow(draw, xy, text, font, fill):
+    x, y = xy
+    draw.text((x + 2, y + 2), text, font=font, fill=_SHADOW)
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def render_signal_chart(analysis: dict, image_bytes: bytes) -> bytes:
     """
-    Generate a plausible-looking candle sequence that visually matches
-    the analyzed trend/direction, purely for illustrative rendering —
-    not real market data (the real analysis already happened via vision).
-
-    The overall path is guaranteed to move in the signal's direction so
-    the chart never visually contradicts the signal it's illustrating;
-    randomness is layered on top only for natural-looking wick/body noise.
-    """
-    rng = random.Random(seed)
-    base = 100.0
-    candles = []
-    price = base
-
-    if trend == "BULLISH":
-        bias = 0.45
-    elif trend == "BEARISH":
-        bias = -0.45
-    else:
-        bias = 0.0
-
-    for i in range(n):
-        local_bias = bias
-        # Stronger, deterministic push in the final stretch so the chart
-        # clearly leads into the signal arrow in the right direction.
-        if i > n - 8:
-            if direction == "BUY":
-                local_bias = max(local_bias, 0.55)
-            elif direction == "SELL":
-                local_bias = min(local_bias, -0.55)
-
-        noise = rng.gauss(0, 0.35)  # small wobble only, bias dominates
-        change = local_bias + noise
-        open_p = price
-        close_p = open_p + change
-        high_p = max(open_p, close_p) + abs(rng.gauss(0.25, 0.15))
-        low_p = min(open_p, close_p) - abs(rng.gauss(0.25, 0.15))
-        candles.append((open_p, high_p, low_p, close_p))
-        price = close_p
-
-    return candles
-
-
-def render_signal_chart(analysis: dict, symbol_label: str = "Live Chart") -> bytes:
-    """
-    Render a branded candlestick chart with signal overlay.
-    Returns PNG bytes ready to send as a Telegram photo.
+    Take the user's real screenshot and overlay a clean signal annotation
+    on top of it — a directional arrow, a confidence badge, and a thin
+    branded footer strip. Returns PNG bytes ready to send as a photo.
     """
     direction = analysis.get("direction", "NEUTRAL")
     confidence = analysis.get("confidence", 0)
@@ -79,78 +52,92 @@ def render_signal_chart(analysis: dict, symbol_label: str = "Live Chart") -> byt
     timeframe = analysis.get("timeframe", "1m")
     expiry = analysis.get("expiry_minutes", 5)
 
-    candles = _synthesize_candles(direction, trend, n=40)
+    base = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    base = ImageOps.exif_transpose(base)  # respect phone camera orientation
+    w, h = base.size
 
-    fig, ax = plt.subplots(figsize=(9, 6), dpi=160)
-    fig.patch.set_facecolor(_BG_COLOR)
-    ax.set_facecolor(_BG_COLOR)
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
-    for i, (o, h, l, c) in enumerate(candles):
-        color = _UP_COLOR if c >= o else _DOWN_COLOR
-        ax.plot([i, i], [l, h], color=color, linewidth=1, zorder=2)
-        body_bottom = min(o, c)
-        body_height = max(abs(c - o), 0.05)
-        ax.add_patch(mpatches.Rectangle(
-            (i - 0.3, body_bottom), 0.6, body_height,
-            facecolor=color, edgecolor=color, zorder=3,
-        ))
-
-    # Signal arrow at the end of the sequence
-    last_close = candles[-1][3]
-    arrow_x = len(candles) - 1
     if direction == "BUY":
-        ax.annotate(
-            "", xy=(arrow_x + 2.2, last_close + 2.5), xytext=(arrow_x, last_close),
-            arrowprops=dict(arrowstyle="-|>", color=_UP_COLOR, lw=3, mutation_scale=25),
-            zorder=5,
-        )
         signal_color = _UP_COLOR
         signal_text = "🟢 BUY / CALL"
+        arrow_up = True
     elif direction == "SELL":
-        ax.annotate(
-            "", xy=(arrow_x + 2.2, last_close - 2.5), xytext=(arrow_x, last_close),
-            arrowprops=dict(arrowstyle="-|>", color=_DOWN_COLOR, lw=3, mutation_scale=25),
-            zorder=5,
-        )
         signal_color = _DOWN_COLOR
         signal_text = "🔴 SELL / PUT"
+        arrow_up = False
     else:
-        signal_color = "#9e9e9e"
-        signal_text = "⚪ NEUTRAL"
+        signal_color = _NEUTRAL_COLOR
+        signal_text = "⚪ NO CLEAR SIGNAL"
+        arrow_up = None
 
-    ax.axhline(y=last_close, color="#555b66", linestyle="--", linewidth=0.8, zorder=1)
+    # --- Scale UI elements relative to image size so it looks right on any resolution ---
+    scale = max(w, h) / 1200.0
+    scale = max(0.6, min(scale, 2.2))
 
-    ax.set_xlim(-1, len(candles) + 3)
-    ax.grid(True, color=_GRID_COLOR, linewidth=0.5, alpha=0.6)
-    ax.set_xticks([])
-    ax.tick_params(colors=_TEXT_COLOR)
-    for spine in ax.spines.values():
-        spine.set_color(_GRID_COLOR)
+    badge_font = _load_font(int(26 * scale), bold=True)
+    sub_font = _load_font(int(18 * scale), bold=False)
+    footer_font = _load_font(int(15 * scale), bold=False)
 
-    ax.set_title(
-        f"{symbol_label}  •  {timeframe} chart  •  {expiry}m expiry",
-        color=_TEXT_COLOR, fontsize=13, fontweight="bold", loc="left", pad=14,
+    # --- Top banner strip (direction + confidence) ---
+    banner_h = int(70 * scale)
+    draw.rectangle([0, 0, w, banner_h], fill=(*signal_color[:3], 235))
+    _draw_text_with_shadow(
+        draw, (int(16 * scale), int(10 * scale)),
+        signal_text, badge_font, _WHITE,
+    )
+    _draw_text_with_shadow(
+        draw, (int(16 * scale), int(10 * scale) + badge_font.size + 2),
+        f"Confidence: {confidence}%  •  {timeframe} chart  •  {expiry}m expiry",
+        sub_font, _WHITE,
     )
 
-    # Signal badge box (top-right)
-    ax.text(
-        0.98, 0.95, f"{signal_text}\nConfidence: {confidence}%",
-        transform=ax.transAxes, fontsize=13, fontweight="bold",
-        color="white", ha="right", va="top",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor=signal_color, edgecolor="none", alpha=0.9),
-        zorder=10,
+    # --- Large directional arrow, bottom-right area (doesn't obscure candles at top) ---
+    if arrow_up is not None:
+        arrow_size = int(90 * scale)
+        margin = int(24 * scale)
+        cx = w - margin - arrow_size // 2
+        cy = h - margin - arrow_size // 2 - int(60 * scale)  # lift above footer
+
+        if arrow_up:
+            pts = [
+                (cx, cy - arrow_size // 2),
+                (cx - arrow_size // 2, cy + arrow_size // 4),
+                (cx - arrow_size // 5, cy + arrow_size // 4),
+                (cx - arrow_size // 5, cy + arrow_size // 2),
+                (cx + arrow_size // 5, cy + arrow_size // 2),
+                (cx + arrow_size // 5, cy + arrow_size // 4),
+                (cx + arrow_size // 2, cy + arrow_size // 4),
+            ]
+        else:
+            pts = [
+                (cx, cy + arrow_size // 2),
+                (cx - arrow_size // 2, cy - arrow_size // 4),
+                (cx - arrow_size // 5, cy - arrow_size // 4),
+                (cx - arrow_size // 5, cy - arrow_size // 2),
+                (cx + arrow_size // 5, cy - arrow_size // 2),
+                (cx + arrow_size // 5, cy - arrow_size // 4),
+                (cx + arrow_size // 2, cy - arrow_size // 4),
+            ]
+
+        # Soft glow/shadow behind the arrow for visibility on any chart background
+        shadow_pts = [(x + 3, y + 3) for x, y in pts]
+        draw.polygon(shadow_pts, fill=(0, 0, 0, 140))
+        draw.polygon(pts, fill=(*signal_color[:3], 235), outline=_WHITE)
+
+    # --- Bottom branding footer strip ---
+    footer_h = int(34 * scale)
+    draw.rectangle([0, h - footer_h, w, h], fill=(0, 0, 0, 190))
+    _draw_text_with_shadow(
+        draw, (int(12 * scale), h - footer_h + int(6 * scale)),
+        "MI Trade Master — Vision Signal Engine  •  Analyzed from your screenshot",
+        footer_font, _WHITE,
     )
 
-    # Watermark / branding footer
-    fig.text(
-        0.02, 0.02, "MI Trade Master — Vision Signal Engine",
-        color="#6b7280", fontsize=9, style="italic",
-    )
-
-    fig.tight_layout(rect=[0, 0.03, 1, 1])
+    composed = Image.alpha_composite(base, overlay).convert("RGB")
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=_BG_COLOR, bbox_inches="tight")
-    plt.close(fig)
+    composed.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf.read()
