@@ -29,6 +29,26 @@ Runs **entirely free, 24/7, on GitHub Actions** — no server required.
   safety net in case the chain ever breaks
 - 💾 **Zero-database persistence** — subscriber list, settings, and stats
   are stored as JSON and committed back to the repo automatically
+- 🖼 **Auto-applied bot identity** — profile photo, name, and description
+  are set programmatically on startup via Telegram's Bot API (no manual
+  BotFather steps needed)
+- 🔁 **Resilient data fetching** — Yahoo Finance symbols (gold, silver,
+  oil, indices, OTC pairs) automatically fall back through multiple
+  interval/period combinations if the tightest resolution has no data,
+  instead of failing outright
+
+---
+
+## 🎨 A note on "colorful backgrounds"
+
+Telegram's Bot API has **no way to set a per-message background color** —
+chat wallpaper is a personal setting each user controls in their own app,
+and bots cannot touch it. This is a Telegram platform limit, not a
+limitation of this bot. What *is* achievable — and what this bot does —
+is rich colored-block visual formatting (🟩/🟥 direction bars, colored
+strip headers, confidence meters) plus a properly branded bot profile
+photo/name/description, which is the closest thing to a "colorful pro
+look" within what Telegram actually allows.
 
 ---
 
@@ -71,8 +91,11 @@ mi-trade-master/
 ├── fetcher.py               # Binance + Yahoo Finance data fetching
 ├── ui.py                    # Message formatting & inline keyboards
 ├── storage.py                # JSON persistence (subscribers/settings/stats)
-├── config.py                  # All settings & asset symbol maps
-├── data/                       # Persisted JSON state (auto-committed)
+├── branding.py                # Auto-sets bot photo/name/description on startup
+├── config.py                   # All settings & asset symbol maps
+├── data/                        # Persisted JSON state (auto-committed)
+├── assets/
+│   └── bot_icon.jpg               # Bot profile photo (auto-applied)
 ├── requirements.txt
 └── .github/workflows/
     └── mi-trade-master.yml      # 24/7 self-restarting workflow

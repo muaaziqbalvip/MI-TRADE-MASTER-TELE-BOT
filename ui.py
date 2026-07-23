@@ -17,19 +17,22 @@ CATEGORY_LABELS = {
 }
 
 
-def _bar(confidence: float) -> str:
-    """Render a small visual confidence bar, e.g. ▰▰▰▰▰▰▰▰▱▱ 84%"""
+def _bar(confidence: float, direction: str = None) -> str:
+    """Render a colored visual confidence bar using direction-tinted blocks."""
     filled = round(confidence / 10)
     filled = max(0, min(10, filled))
-    return "▰" * filled + "▱" * (10 - filled)
+    fill_emoji = "🟩" if direction == "BUY" else "🟥" if direction == "SELL" else "🟦"
+    return fill_emoji * filled + "⬜" * (10 - filled)
 
 
 def welcome_text(first_name: str) -> str:
     return (
+        f"🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢\n"
         f"👋 <b>Welcome, {first_name}!</b>\n\n"
         f"🤖 <b>{BOT_NAME}</b>\n"
-        f"<i>{BOT_TAGLINE}</i>\n\n"
-        f"🔵🟢 Smart Money Concepts + Multi-Indicator Confluence Engine\n"
+        f"<i>{BOT_TAGLINE}</i>\n"
+        f"🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢🔵🟢\n\n"
+        f"🧠 Smart Money Concepts + Multi-Indicator Confluence Engine\n"
         f"⚡ Live signals scanned every minute, 24/7\n"
         f"🎯 Only high-confidence setups get broadcast\n\n"
         f"Use the buttons below to get started 👇"
@@ -109,21 +112,27 @@ def format_signal_card(signal: dict, is_otc: bool = False) -> str:
     symbol = signal["symbol"]
     name = DISPLAY_NAMES.get(symbol, symbol)
     direction = signal["direction"]
-    emoji = DIRECTION_EMOJI.get(direction, "⚪")
     conf = signal["confidence"]
     reasons = "\n".join(f"   ▫️ {r}" for r in signal["reasons"])
     otc_tag = " (OTC)" if is_otc else ""
 
+    if direction == "BUY":
+        top_strip = "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
+        direction_line = "🟢 <b>BUY / CALL</b> ⬆️"
+    else:
+        top_strip = "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
+        direction_line = "🔴 <b>SELL / PUT</b> ⬇️"
+
     return (
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"{emoji} <b>{name}{otc_tag}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"📍 <b>Signal:</b> {'🟢 BUY' if direction == 'BUY' else '🔴 SELL'}\n"
+        f"{top_strip}\n"
+        f"💎 <b>{name}{otc_tag}</b>\n"
+        f"{top_strip}\n\n"
+        f"📍 <b>Signal:</b> {direction_line}\n"
         f"💰 <b>Entry:</b> <code>{signal['entry_price']}</code>\n"
         f"⏱ <b>Expiry:</b> {signal['expiry_minutes']} min\n"
         f"📐 <b>Trend:</b> {signal['trend']}\n\n"
         f"🎯 <b>Confidence: {conf}%</b>\n"
-        f"{_bar(conf)}\n\n"
+        f"{_bar(conf, direction)}\n\n"
         f"🧠 <b>Why:</b>\n{reasons}\n\n"
         f"🤖 <i>{BOT_NAME}</i> · #{symbol}"
     )

@@ -178,8 +178,13 @@ def _run_live_analysis(chat_id, msg_id, symbol):
     df = fetch_candles(symbol)
 
     if df is None:
+        name = symbol
         bot.edit_message_text(
-            f"⚠️ <b>Couldn't fetch data for {symbol}.</b>\n\nTry again in a moment.",
+            f"⚠️ <b>{name} data unavailable right now</b>\n\n"
+            f"This can happen when the market is closed/thinly traded "
+            f"(common for commodities, indices, and some OTC pairs off-hours) "
+            f"or Yahoo Finance is briefly rate-limiting.\n\n"
+            f"👉 Try a Forex or Crypto pair instead, or retry in a minute.",
             chat_id, msg_id,
             reply_markup=ui.back_keyboard("menu:live"),
         )

@@ -12,6 +12,7 @@ import time
 
 import storage
 from bot import bot
+from branding import apply_branding
 from config import BOT_TOKEN, MAX_RUNTIME_MINUTES
 from scanner import run_scanner_loop
 
@@ -41,6 +42,11 @@ def main():
         sys.exit(1)
 
     storage.load_stats()  # ensures stats file + started_at exist
+
+    try:
+        apply_branding()
+    except Exception as e:
+        log.warning(f"Branding setup skipped: {e}")
 
     stop_event = threading.Event()
 
