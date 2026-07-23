@@ -13,8 +13,9 @@ import time
 import storage
 from bot import bot
 from branding import apply_branding
-from config import BOT_TOKEN, MAX_RUNTIME_MINUTES
+from config import BOT_TOKEN, MAX_RUNTIME_MINUTES, GROQ_API_KEY
 from scanner import run_scanner_loop
+import diagnostics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +23,12 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger("mi.main")
+
+# Mirror every mi.* logger's output into the in-memory rolling buffer so
+# /logs can show live diagnostics without needing GitHub Actions access.
+_buffer_handler = diagnostics.BufferLogHandler()
+_buffer_handler.setLevel(logging.INFO)
+logging.getLogger("mi").addHandler(_buffer_handler)
 
 
 def _polling_thread(stop_event):
@@ -42,6 +49,13 @@ def main():
         sys.exit(1)
 
     storage.load_stats()  # ensures stats file + started_at exist
+    diagnostics.bind_bot(bot)
+
+    if not GROQ_API_KEY:
+        log.warning(
+            "⚠️ GROQ_API_KEY is not set — screenshot chart analysis will not work "
+            "until this secret is added. All other features are unaffected."
+        )
 
     try:
         apply_branding()

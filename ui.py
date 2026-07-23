@@ -215,6 +215,55 @@ def vision_analyzing_text() -> str:
     return "🔍 <b>Analyzing your chart...</b>\n\n⏳ Reading price action and structure..."
 
 
+_ERROR_MESSAGES = {
+    "no_api_key": (
+        "⚙️ <b>Vision analysis isn't configured yet.</b>\n\n"
+        "The bot's <code>GROQ_API_KEY</code> secret is missing. The admin needs to "
+        "add a free key from <a href='https://console.groq.com'>console.groq.com</a> "
+        "to the repo's GitHub Actions secrets."
+    ),
+    "auth_failed": (
+        "🔑 <b>Groq API key was rejected.</b>\n\n"
+        "The configured <code>GROQ_API_KEY</code> is invalid or expired. "
+        "The admin should generate a new key at "
+        "<a href='https://console.groq.com'>console.groq.com</a> and update the secret."
+    ),
+    "rate_limited": (
+        "⏳ <b>Vision analysis is rate-limited right now.</b>\n\n"
+        "Too many requests were sent to Groq in a short time. Please wait a "
+        "minute and try again."
+    ),
+    "bad_request": (
+        "⚠️ <b>Groq rejected this image.</b>\n\n"
+        "It may be too large, corrupted, or in an unsupported format. Try a "
+        "smaller/clearer screenshot."
+    ),
+    "server_error": (
+        "🌐 <b>Groq's servers had an issue.</b>\n\n"
+        "This is on Groq's side, not the bot. Please try again in a moment."
+    ),
+    "network_error": (
+        "📡 <b>Couldn't reach the vision analysis service.</b>\n\n"
+        "This looks like a temporary network issue. Please try again shortly."
+    ),
+    "parse_error": (
+        "🤖 <b>The AI's response couldn't be understood.</b>\n\n"
+        "This can happen occasionally. Please try sending the screenshot again."
+    ),
+}
+
+
+def vision_error_text(error_code: str, error_detail: str = None) -> str:
+    base = _ERROR_MESSAGES.get(
+        error_code,
+        "⚠️ <b>Couldn't analyze that image.</b>\n\nMake sure it's a clear "
+        "screenshot of a price chart, then try again.",
+    )
+    if error_detail:
+        base += f"\n\n<code>Details: {error_detail[:200]}</code>"
+    return base
+
+
 def format_vision_signal_caption(analysis: dict) -> str:
     direction = analysis.get("direction", "NEUTRAL")
     confidence = analysis.get("confidence", 0)
@@ -254,6 +303,23 @@ def format_vision_signal_caption(analysis: dict) -> str:
         f"🧠 <b>Why:</b>\n{reasons_block}"
         f"{risk_block}\n\n"
         f"🤖 <i>{BOT_NAME}</i> · Vision Signal Engine"
+    )
+
+
+def system_health_text() -> str:
+    from config import GROQ_API_KEY, BOT_TOKEN
+    groq_status = "✅ Configured" if GROQ_API_KEY else "❌ Not configured"
+    bot_status = "✅ Configured" if BOT_TOKEN else "❌ Not configured"
+    return (
+        f"🩺 <b>System Health Check</b>\n\n"
+        f"🤖 Bot Token: {bot_status}\n"
+        f"👁 Vision (Groq) API: {groq_status}\n\n"
+        + (
+            "" if GROQ_API_KEY else
+            "⚠️ <i>Screenshot analysis won't work until GROQ_API_KEY is added "
+            "to the bot's secrets. Get a free key at console.groq.com.</i>\n\n"
+        )
+        + "Use /logs to see recent activity and errors (admin only if configured)."
     )
 
 

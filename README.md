@@ -24,6 +24,9 @@ Runs **entirely free, 24/7, on GitHub Actions** — no server required.
   (Quotex, TradingView, MetaTrader, any platform) and get an instant
   AI-powered read of the visible price action, rendered back as a clean
   branded signal chart — no login or account access required, ever
+- 🩺 **Live diagnostics** — `/logs` shows recent bot activity/errors right
+  in Telegram, and specific error messages (missing API key, auth failure,
+  rate limit, etc.) instead of one generic "something went wrong"
 - ⚙️ **Per-user preferences** — subscribe/unsubscribe, pick asset categories,
   set your own minimum confidence threshold, and set your default chart
   timeframe + trade expiry for screenshot analysis
@@ -104,6 +107,7 @@ mi-trade-master/
 ├── fetcher.py               # Binance + Yahoo Finance data fetching
 ├── ui.py                    # Message formatting & inline keyboards
 ├── storage.py                # JSON persistence (subscribers/settings/stats)
+├── diagnostics.py             # Live log buffer + /logs command + admin alerts
 ├── branding.py                # Auto-sets bot photo/name/description on startup
 ├── config.py                   # All settings & asset symbol maps
 ├── data/                        # Persisted JSON state (auto-committed)
@@ -113,6 +117,29 @@ mi-trade-master/
 └── .github/workflows/
     └── mi-trade-master.yml      # 24/7 self-restarting workflow
 ```
+
+---
+
+## 🩺 Troubleshooting
+
+If screenshot analysis (or anything else) isn't working:
+
+1. **Check ⚙️ Preferences → About → 🩺 System Health** in the bot — shows
+   whether `BOT_TOKEN` and `GROQ_API_KEY` are actually configured.
+2. **Send `/logs`** to the bot — shows the last 30 events (info/warnings/
+   errors) from the current session, including the *specific* reason any
+   screenshot analysis failed (missing key, invalid key, rate limit,
+   network issue, etc.) instead of a generic error.
+3. **Check the GitHub Actions run logs** (Actions tab → latest run →
+   expand "Run MI Trade Master") for the full server-side log, including
+   every fetch/analysis attempt.
+4. If `/logs` says `no_api_key` or `auth_failed`, the `GROQ_API_KEY`
+   secret is missing or wrong — add/fix it in **Settings → Secrets and
+   variables → Actions**, then re-run the workflow.
+
+If `ADMIN_CHAT_IDS` is set, `/logs` is restricted to those chat IDs, and
+critical config errors (missing/invalid Groq key) are pushed to them
+automatically the moment they happen.
 
 ---
 

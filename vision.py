@@ -52,14 +52,25 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
-def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int) -> dict | None:
+def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int):
     """
-    Send a chart screenshot to the Groq vision model and return a
-    structured analysis dict, or None on failure.
+    Send a chart screenshot to the Groq vision model.
+
+    Returns a tuple: (analysis_dict_or_None, error_code_or_None, error_detail_or_None)
+
+    error_code is one of:
+      "no_api_key"    — GROQ_API_KEY not configured on the server
+      "auth_failed"   — Groq rejected the API key (401/403)
+      "rate_limited"  — Groq rate limit hit (429)
+      "bad_request"   — Groq rejected the request (400, e.g. image too large/invalid)
+      "server_error"  — Groq-side 5xx error
+      "network_error" — could not reach Groq at all (timeout/DNS/connection)
+      "parse_error"   — got a response but couldn't parse it as valid JSON
+      None            — success, analysis_dict is populated
     """
     if not GROQ_API_KEY:
         log.error("GROQ_API_KEY not configured")
-        return None
+        return None, "no_api_key", "GROQ_API_KEY environment variable is empty or not set."
 
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -95,46 +106,87 @@ def analyze_chart_image(image_bytes: bytes, timeframe: str, expiry_minutes: int)
 
     try:
         r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
-        r.raise_for_status()
+    except requests.exceptions.Timeout:
+        log.error("Groq request timed out")
+        return None, "network_error", "Request to Groq timed out after 30s."
+    except requests.exceptions.ConnectionError as e:
+        log.error(f"Groq connection failed: {e}")
+        return None, "network_error", f"Could not reach api.groq.com: {e}"
+    except requests.exceptions.RequestException as e:
+        log.error(f"Groq request failed: {e}")
+        return None, "network_error", str(e)
+
+    if r.status_code == 401 or r.status_code == 403:
+        detail = _safe_error_detail(r)
+        log.error(f"Groq auth failed ({r.status_code}): {detail}")
+        return None, "auth_failed", detail
+
+    if r.status_code == 429:
+        detail = _safe_error_detail(r)
+        log.error(f"Groq rate limited: {detail}")
+        return None, "rate_limited", detail
+
+    if r.status_code == 400:
+        detail = _safe_error_detail(r)
+        log.error(f"Groq rejected request (400): {detail}")
+        return None, "bad_request", detail
+
+    if r.status_code >= 500:
+        detail = _safe_error_detail(r)
+        log.error(f"Groq server error ({r.status_code}): {detail}")
+        return None, "server_error", detail
+
+    if r.status_code != 200:
+        detail = _safe_error_detail(r)
+        log.error(f"Groq unexpected status {r.status_code}: {detail}")
+        return None, "server_error", f"HTTP {r.status_code}: {detail}"
+
+    try:
         result = r.json()
         content = result["choices"][0]["message"]["content"]
-        parsed = _extract_json(content)
+    except (KeyError, IndexError, ValueError) as e:
+        log.error(f"Unexpected Groq response shape: {e} — raw: {r.text[:300]}")
+        return None, "parse_error", f"Unexpected response shape from Groq: {e}"
 
-        if not parsed:
-            log.error(f"Could not parse vision response as JSON: {content[:200]}")
-            return None
+    parsed = _extract_json(content)
+    if not parsed:
+        log.error(f"Could not parse vision response as JSON: {content[:300]}")
+        return None, "parse_error", "Model did not return valid JSON."
 
-        # Normalize / validate fields
-        direction = str(parsed.get("direction", "NEUTRAL")).upper()
-        if direction not in ("BUY", "SELL", "NEUTRAL"):
-            direction = "NEUTRAL"
+    # Normalize / validate fields
+    direction = str(parsed.get("direction", "NEUTRAL")).upper()
+    if direction not in ("BUY", "SELL", "NEUTRAL"):
+        direction = "NEUTRAL"
 
-        confidence = parsed.get("confidence", 0)
-        try:
-            confidence = max(0, min(100, int(confidence)))
-        except (ValueError, TypeError):
-            confidence = 0
+    confidence = parsed.get("confidence", 0)
+    try:
+        confidence = max(0, min(100, int(confidence)))
+    except (ValueError, TypeError):
+        confidence = 0
 
-        reasons = parsed.get("reasons", [])
-        if not isinstance(reasons, list):
-            reasons = []
-        reasons = [str(r) for r in reasons][:4]
+    reasons = parsed.get("reasons", [])
+    if not isinstance(reasons, list):
+        reasons = []
+    reasons = [str(r) for r in reasons][:4]
 
-        return {
-            "asset_guess": parsed.get("asset_guess"),
-            "direction": direction,
-            "confidence": confidence,
-            "trend": parsed.get("trend", "RANGING"),
-            "key_observation": parsed.get("key_observation", ""),
-            "reasons": reasons,
-            "risk_note": parsed.get("risk_note"),
-            "timeframe": timeframe,
-            "expiry_minutes": expiry_minutes,
-        }
+    analysis = {
+        "asset_guess": parsed.get("asset_guess"),
+        "direction": direction,
+        "confidence": confidence,
+        "trend": parsed.get("trend", "RANGING"),
+        "key_observation": parsed.get("key_observation", ""),
+        "reasons": reasons,
+        "risk_note": parsed.get("risk_note"),
+        "timeframe": timeframe,
+        "expiry_minutes": expiry_minutes,
+    }
+    return analysis, None, None
 
-    except requests.exceptions.RequestException as e:
-        log.error(f"Groq vision request failed: {e}")
-        return None
-    except (KeyError, IndexError) as e:
-        log.error(f"Unexpected Groq response shape: {e}")
-        return None
+
+def _safe_error_detail(response) -> str:
+    """Best-effort extraction of a human-readable error message from a Groq error response."""
+    try:
+        data = response.json()
+        return data.get("error", {}).get("message", response.text[:300])
+    except Exception:
+        return response.text[:300] if response.text else f"HTTP {response.status_code}"

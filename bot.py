@@ -9,7 +9,8 @@ from telebot import types
 
 import storage
 import ui
-from config import BOT_TOKEN, ASSETS, CONFIDENCE_THRESHOLD
+import diagnostics
+from config import BOT_TOKEN, ASSETS, CONFIDENCE_THRESHOLD, ADMIN_CHAT_IDS
 from engine import generate_signal
 from fetcher import fetch_candles
 from vision import analyze_chart_image
@@ -39,6 +40,15 @@ def handle_start(message):
 @bot.message_handler(commands=["menu"])
 def handle_menu(message):
     _show_main_menu(message.chat.id)
+
+
+@bot.message_handler(commands=["logs"])
+def handle_logs(message):
+    chat_id = message.chat.id
+    if ADMIN_CHAT_IDS and str(chat_id) not in ADMIN_CHAT_IDS:
+        bot.send_message(chat_id, "🔒 This command is restricted to bot admins.")
+        return
+    bot.send_message(chat_id, diagnostics.format_logs_text(30))
 
 
 def _show_main_menu(chat_id, message_id=None):
@@ -178,9 +188,18 @@ def handle_callback(call):
 
         elif data == "menu:about":
             bot.answer_callback_query(call.id)
+            kb = ui.back_keyboard()
+            kb.add(types.InlineKeyboardButton("🩺 System Health", callback_data="menu:health"))
             bot.edit_message_text(
                 ui.about_text(), chat_id, msg_id,
-                reply_markup=ui.back_keyboard(),
+                reply_markup=kb,
+            )
+
+        elif data == "menu:health":
+            bot.answer_callback_query(call.id)
+            bot.edit_message_text(
+                ui.system_health_text(), chat_id, msg_id,
+                reply_markup=ui.back_keyboard("menu:about"),
             )
 
         elif data == "menu:live":
@@ -264,32 +283,68 @@ def _run_live_analysis(chat_id, msg_id, symbol):
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
     chat_id = message.chat.id
+    username = message.from_user.username or message.from_user.first_name or "unknown"
     settings = storage.get_user_settings(chat_id)
     timeframe = settings.get("chart_timeframe", "1m")
     expiry = settings.get("expiry_minutes", 5)
+
+    log.info(f"📸 [{chat_id}/{username}] Screenshot received — tf={timeframe} expiry={expiry}m")
 
     status_msg = bot.send_message(chat_id, ui.vision_analyzing_text())
     bot.send_chat_action(chat_id, "upload_photo")
 
     try:
-        # Telegram sends multiple resolutions; take the highest quality one
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         image_bytes = bot.download_file(file_info.file_path)
+        log.info(f"📥 [{chat_id}] Image downloaded — {len(image_bytes)} bytes")
+    except Exception as e:
+        log.error(f"❌ [{chat_id}] Failed to download photo from Telegram: {e}")
+        bot.edit_message_text(
+            "⚠️ <b>Couldn't download that image from Telegram.</b>\n\nPlease try sending it again.",
+            chat_id, status_msg.message_id,
+            reply_markup=ui.back_keyboard(),
+        )
+        return
 
-        analysis = analyze_chart_image(image_bytes, timeframe, expiry)
+    analysis, error_code, error_detail = analyze_chart_image(image_bytes, timeframe, expiry)
 
-        if not analysis:
-            bot.edit_message_text(
-                "⚠️ <b>Couldn't analyze that image.</b>\n\n"
-                "Make sure it's a clear screenshot of a price chart, then try again.",
-                chat_id, status_msg.message_id,
-                reply_markup=ui.back_keyboard(),
+    if error_code:
+        log.error(f"❌ [{chat_id}] Vision analysis failed — code={error_code} detail={error_detail}")
+        if error_code in ("no_api_key", "auth_failed"):
+            diagnostics.record(
+                "ERROR",
+                f"Vision analysis blocked: {error_code} — {error_detail}",
+                notify_admin=True,
             )
-            return
+        bot.edit_message_text(
+            ui.vision_error_text(error_code, error_detail),
+            chat_id, status_msg.message_id,
+            reply_markup=ui.back_keyboard(),
+            disable_web_page_preview=True,
+        )
+        return
 
+    log.info(
+        f"✅ [{chat_id}] Vision analysis OK — direction={analysis['direction']} "
+        f"confidence={analysis['confidence']}% trend={analysis['trend']}"
+    )
+
+    try:
         chart_png = render_signal_chart(analysis, symbol_label=analysis.get("asset_guess") or "Your Chart")
+        log.info(f"🖼️ [{chat_id}] Chart image rendered — {len(chart_png)} bytes")
+    except Exception as e:
+        log.error(f"❌ [{chat_id}] Chart rendering failed: {e}")
+        # Analysis succeeded even though rendering failed — still give the user the text result
+        bot.edit_message_text(
+            ui.format_vision_signal_caption(analysis) +
+            "\n\n⚠️ <i>(Chart image rendering failed — showing text result only)</i>",
+            chat_id, status_msg.message_id,
+            reply_markup=ui.back_keyboard(),
+        )
+        return
 
+    try:
         bot.delete_message(chat_id, status_msg.message_id)
         bot.send_photo(
             chat_id,
@@ -297,17 +352,14 @@ def handle_photo(message):
             caption=ui.format_vision_signal_caption(analysis),
             reply_markup=ui.back_keyboard(),
         )
-
+        log.info(f"📤 [{chat_id}] Signal chart sent successfully")
     except Exception as e:
-        log.error(f"Photo analysis failed: {e}")
-        try:
-            bot.edit_message_text(
-                "⚠️ <b>Something went wrong analyzing that screenshot.</b>\n\nPlease try again.",
-                chat_id, status_msg.message_id,
-                reply_markup=ui.back_keyboard(),
-            )
-        except Exception:
-            pass
+        log.error(f"❌ [{chat_id}] Failed to send result photo: {e}")
+        bot.send_message(
+            chat_id,
+            ui.format_vision_signal_caption(analysis),
+            reply_markup=ui.back_keyboard(),
+        )
 
 
 # ---------------------------------------------------------------------------
