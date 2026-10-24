@@ -1,21 +1,21 @@
 {
-  "total_signals": 1186,
+  "total_signals": 1385,
   "by_direction": {
-    "BUY": 542,
-    "SELL": 644
+    "BUY": 650,
+    "SELL": 735
   },
   "by_symbol": {
-    "BTCUSDT": 156,
-    "ETHUSDT": 163,
-    "XRPUSDT": 155,
-    "LTCUSDT": 157,
-    "BNBUSDT": 144,
-    "ADAUSDT": 139,
+    "BTCUSDT": 206,
+    "ETHUSDT": 211,
+    "XRPUSDT": 206,
+    "LTCUSDT": 200,
+    "BNBUSDT": 149,
+    "ADAUSDT": 141,
     "DOTUSDT": 114,
     "LINKUSDT": 125,
     "SOLUSDT": 27,
     "DOGEUSDT": 6
   },
   "started_at": "2026-07-23T07:53:42.613826+00:00",
-  "last_signal_at": "2026-10-22T05:59:59.100371+00:00"
+  "last_signal_at": "2026-10-24T03:22:17.798161+00:00"
 }
